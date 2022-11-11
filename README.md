@@ -51,17 +51,49 @@ There are two different paths to take to handle this complexity:
 1. Maintain the objects (typing) through the entire group-by
 2. Utilize SparkSQL native `agg` functions and joins to build a matching schema
 
-While option 2 may be very efficient if done correctly, the different dimensions
-of the final dataset require multiple operations, long and hard to read `agg(f...)`
-statements, and is liable to have excess shuffles.
+While **Option 2** may be very efficient if done correctly, the different dimensions
+of the final dataset require multiple operations, a lengthy `agg(f...)`statement, 
+and would be liable to have excess shuffles.
 
 Option 1 can be achieved easily using the `.groupByKey.mapGroups` method, 
 which will retain typing as it passes to the map function a tuple with 
 each `customer_id` paired with an iterator of their `CustomerPurchase` set.
 
-This can be a quick way to retain typing through a map, but similar to
-`.map()` vs a Spark UDF, there are not as efficient.
+Grouping into a map can be a quick way to retain typing and work with the
+original data, but similar to `.map()` vs a Spark UDF, it is not the most
+efficient available option.
 
 ```scala
-// TODO
+purchases.groupByKey(_.customer_id).mapGroups {
+
+  case (customer_id: Long, purchases: Iterator[CustomerPurchase]) =>
+
+    // Sorting full set of purchases by rating descending for future purposes
+    val p = purchases.toSeq.sortBy(_.shoe_rating)
+
+    // Sort names by count in reverse
+    val names = p.groupBy(_.customer_name).map {
+      case (name, list) => (name, list.length)
+    }.toSeq.sortBy(_._2).reverse
+
+    // Avoid running `contains` twice for circle shoe logic
+    val starShoe: Option[CustomerPurchase] = p.find(_.shoe_description.contains("star"))
+
+    // Populate summary information using sorted purchases sequence
+    CustomerSummary(
+      customer_id = customer_id,
+      customer_name = names.head._1,
+      name_variants = if (names.length > 1) names.map(_._1).toSet else Set.empty,
+      first_purchase_date = p.map(_.purchase_date).min,
+      total_purchases = p.length,
+      average_price = p.map(_.shoe_price).sum / p.length,
+      best_shoe = p.head,
+      worst_shoe = p.last,
+      best_star_shoe = starShoe,
+      circle_lover_designs = if (starShoe.isEmpty) Some(
+        p.map(_.shoe_description).filter(_.contains("circle")).toSet
+      ) else None
+    )
+
+}
 ```
