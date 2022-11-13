@@ -9,7 +9,7 @@ import java.sql.Date
 
 trait ShapesOnShoesApp extends App {
 
-  def transformPurchases(spark: SparkSession, value: Dataset[CustomerPurchase]): Dataset[CustomerSummary]
+  def transformPurchases(purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary]
 
   lazy val spark: SparkSession = SparkSession.builder().getOrCreate()
   import spark.implicits._
@@ -24,7 +24,7 @@ trait ShapesOnShoesApp extends App {
     .as[CustomerPurchase]
 
   // Run transformation function
-  val summaries = transformPurchases(spark, purchases)
+  val summaries = transformPurchases(purchases)
 
   // Write to provided path
   summaries.write.parquet(summaryPath)
@@ -34,9 +34,9 @@ trait ShapesOnShoesApp extends App {
 
 trait V1 {
 
-  def transformPurchases(spark: SparkSession, purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary] = {
+  def transformPurchases(purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary] = {
 
-    import spark.implicits._
+    import purchases.sparkSession.implicits._
 
     val groupFunction: (Long, Iterator[CustomerPurchase]) => CustomerSummary = {
 
@@ -93,7 +93,7 @@ case class SummaryBuffer(
   best: CustomerPurchase,
   worst: CustomerPurchase,
   star: Option[CustomerPurchase],
-  circles: Option[Seq[String]]
+  circles: Option[Set[String]]
 )
 
 class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuffer], CustomerSummary] {
@@ -114,17 +114,15 @@ class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuff
       best = a,
       worst = a,
       star = if (isStar) Some(a) else None,
-      circles = if (circleLover) Some(Seq(a.shoe_description) else None
+      circles = if (circleLover) Some(Set(a.shoe_description)) else None
     )
 
-    // Non-zero b case
-    if (b.isDefined) {
-
-
-
+    // IF non-zero b case merge two buffers, else return newBuffer
+    b match {
+      case Some(other) => Some(mergeBuffers(other, newBuffer))
+      case None => Some(newBuffer)
     }
 
-    ???
   }
 
   override def merge(b1: Option[SummaryBuffer], b2: Option[SummaryBuffer]): Option[SummaryBuffer] = {
@@ -153,7 +151,7 @@ class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuff
     val averagePrice = (a.totalCount * a.averagePrice + b.totalCount * b.averagePrice) / totalCount
 
     // Only keep circle data if there are no star shoes
-    val circleLoverData: Option[Seq[String]] = {
+    val circleLoverData: Option[Set[String]] = {
       if (a.star.isDefined || b.star.isDefined) {
         None
       } else {
@@ -190,7 +188,31 @@ class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuff
 
   }
 
-  override def finish(reduction: Option[SummaryBuffer]): CustomerSummary = ???
+  override def finish(reduction: Option[SummaryBuffer]): CustomerSummary = {
+
+    val buf = reduction.get
+    val sortedNames: Seq[String] = if (buf.nameCount.size > 1) {
+      buf.nameCount.toSeq
+         .sortBy(_._2).reverse
+         .map(_._1)
+    } else {
+      buf.nameCount.keys.toSeq
+    }
+
+    CustomerSummary(
+      customer_id = buf.customerId,
+      customer_name = sortedNames.head,
+      name_variants = if (sortedNames.length > 1) sortedNames.slice(1, sortedNames.length - 1).toSet else Set.empty,
+      first_purchase_date = buf.firstPurchase,
+      total_purchases = buf.totalCount,
+      average_price = buf.averagePrice,
+      best_shoe = buf.best,
+      worst_shoe = buf.worst,
+      best_star_shoe = buf.star,
+      circle_lover_designs = buf.circles
+    )
+
+  }
 
   override def bufferEncoder: Encoder[Option[SummaryBuffer]] = ExpressionEncoder[Option[SummaryBuffer]]
 
@@ -199,7 +221,7 @@ class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuff
 
 trait V2 {
 
-  def transformPurchases(spark: SparkSession, purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary] = {
+  def transformPurchases(purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary] = {
 
     import purchases.sparkSession.implicits._
 
