@@ -5,9 +5,8 @@ import org.apache.spark.sql.functions.{max, min}
 import org.scalatest.matchers.must.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-class DataGeneratorTest extends AnyWordSpec with Matchers {
+class DataGeneratorTest extends AnyWordSpec with Matchers with SparkTest {
 
-  implicit val spark: SparkSession = SparkSession.builder().master("local").getOrCreate()
   import spark.implicits._
 
   "RAND random generator" when {
