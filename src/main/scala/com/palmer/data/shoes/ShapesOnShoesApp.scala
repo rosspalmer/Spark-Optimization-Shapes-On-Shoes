@@ -38,6 +38,7 @@ trait V1 {
 
     import purchases.sparkSession.implicits._
 
+    // Create anonymous
     val groupFunction: (Long, Iterator[CustomerPurchase]) => CustomerSummary = {
 
       case (customer_id: Long, purchases: Iterator[CustomerPurchase]) =>
@@ -57,7 +58,8 @@ trait V1 {
         CustomerSummary(
           customer_id = customer_id,
           customer_name = names.head._1,
-          name_variants = if (names.length > 1) names.map(_._1).toSet else Set.empty,
+          // Only include lower count names as variants
+          name_variants = if (names.length > 1) names.map(_._1).slice(1, names.length).toSet else Set.empty,
           first_purchase_date = p.map(_.purchase_date).min,
           total_purchases = p.length,
           average_price = p.map(_.shoe_price).sum / p.length,
@@ -203,7 +205,8 @@ class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuff
     CustomerSummary(
       customer_id = buf.customerId,
       customer_name = sortedNames.head,
-      name_variants = if (sortedNames.length > 1) sortedNames.slice(1, sortedNames.length - 1).toSet else Set.empty,
+      // Only include lower count names as variants
+      name_variants = if (sortedNames.length > 1) sortedNames.slice(1, sortedNames.length).toSet else Set.empty,
       first_purchase_date = buf.firstPurchase,
       total_purchases = buf.totalCount,
       average_price = buf.averagePrice,
