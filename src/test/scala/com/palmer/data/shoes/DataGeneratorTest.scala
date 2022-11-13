@@ -25,6 +25,67 @@ class DataGeneratorTest extends AnyWordSpec with Matchers {
 
     }
 
+    "generating a string" should {
+
+      val fourLetter = RAND.getRandomString(4)
+
+      "have proper length" in {
+
+        fourLetter.length must equal (4)
+
+      }
+
+      "create a single character" in {
+
+        val single = RAND.getRandomString(1)
+        single.length must equal (1)
+
+      }
+
+    }
+
+  }
+
+  "CustomerInfo case class" when {
+
+    "providing name with possible variant" should {
+
+      val info = CustomerInfo(123L, "hello dude")
+      val names: Seq[String] = (1 to 200).map(_ => info.getNameWithPossibleVariation())
+
+      "return same length names" in {
+
+        val nameLength = names.head.length
+        for (name <- names) {
+
+          name must have length nameLength
+
+        }
+
+      }
+
+      "return ~10% variants" in {
+
+        names must have length 200
+
+        val nameCounts: Seq[(String, Int)] = names.groupBy(n => n)
+                                                  .map(n => (n._1, n._2.length)).toSeq
+                                                  .sortBy(_._2).reverse
+
+        nameCounts.length must be >= 2
+
+        val topNameCount = nameCounts.head._2
+        println(topNameCount)
+
+        // Check for 95% (190) - 70% (140) result range
+        topNameCount must be <= 190
+        topNameCount must be >= 140
+
+
+      }
+
+    }
+
   }
 
   "DataGenerator" when {

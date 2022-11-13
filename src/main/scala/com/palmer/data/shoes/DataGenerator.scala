@@ -4,8 +4,9 @@ import org.apache.spark.sql.functions.{explode, lit, udf}
 import org.apache.spark.sql.{Dataset, SparkSession}
 
 import java.sql.Date
+
 import scala.util.Random
-import scala.math.round
+import scala.math.{max, round}
 
 object RAND {
 
@@ -42,13 +43,14 @@ case class CustomerInfo(customerId: Long, name: String) {
 
   val VARIATION_PROBABILITY = 0.1
 
-  // FIXME is cutting out too many characters
   def getNameWithPossibleVariation(): String = {
     if (RAND.r.nextDouble() > VARIATION_PROBABILITY) {
       name
     } else {
-      val replacement = RAND.r.nextInt(name.length - 1)
-      name.substring(0, replacement - 1) + RAND.getRandomString(1) + name.substring(replacement + 1)
+      // Only start replacement after first character
+      // and end before last character for easy coding
+      val replacement = max(1, RAND.r.nextInt(name.length - 2))
+      name.substring(0, replacement - 1) + RAND.getRandomString(1) + name.substring(replacement)
     }
   }
 
@@ -130,6 +132,7 @@ object DataGenerator extends App {
 
     }
 
+    // Expand generated purchase sequences for give customer id (given by range)
     spark.range(numberCustomers)
          .withColumn("purchases", explode(purchaseUDF($"id")))
          .select("purchases.*")
