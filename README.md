@@ -52,8 +52,8 @@ There are two different paths to take to handle this complexity:
 2. Utilize SparkSQL native `agg` functions and joins to build a matching schema
 
 While **Option 2** may be very efficient if done correctly, the different dimensions
-of the final dataset require multiple operations, a lengthy `agg(f...)`statement, 
-and would be liable to have excess shuffles.
+of the final dataset require multiple operations, untyped `agg/select`statements, 
+and could be liable to have excess shuffles.
 
 **Option 1** can be achieved easily using the `.groupByKey.mapGroups` method, 
 which will retain typing as it passes to the map function a tuple with 
@@ -65,47 +65,7 @@ efficient available option.
 
 ```scala
 object ShapesOnShoesV1App extends ShapesOnShoesApp {
-
-  def transformPurchases(purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary] = {
-
-    import spark.implicits._
-
-    val groupFunction: (Long, Iterator[CustomerPurchase]) => CustomerSummary = {
-
-      case (customer_id: Long, purchases: Iterator[CustomerPurchase]) =>
-
-        // Sorting full set of purchases by rating descending for future purposes
-        val p = purchases.toSeq.sortBy(_.shoe_rating)
-
-        // Sort names by count in reverse
-        val names = p.groupBy(_.customer_name).map {
-          case (name, list) => (name, list.length)
-        }.toSeq.sortBy(_._2).reverse
-
-        // Avoid running `contains` twice for circle shoe logic
-        val starShoe: Option[CustomerPurchase] = p.find(_.shoe_description.contains("star"))
-
-        // Populate summary information using sorted purchases sequence
-        CustomerSummary(
-          customer_id = customer_id,
-          customer_name = names.head._1,
-          name_variants = if (names.length > 1) names.map(_._1).toSet else Set.empty,
-          first_purchase_date = p.map(_.purchase_date).min,
-          total_purchases = p.length,
-          average_price = p.map(_.shoe_price).sum / p.length,
-          best_shoe = p.head,
-          worst_shoe = p.last,
-          best_star_shoe = starShoe,
-          circle_lover_designs = if (starShoe.isEmpty) Some(
-            p.map(_.shoe_description).filter(_.contains("circle")).toSet
-          ) else None
-        )
-
-    }
-
-    purchases.groupByKey(_.customer_id).mapGroups(groupFunction)
-
-  }
+FIXME update
 
 }
 ```

@@ -38,7 +38,8 @@ trait V1 {
 
     import purchases.sparkSession.implicits._
 
-    // Create anonymous
+    // Create anonymous function for resolving group of CustomerPurchase
+    // objects by customer ID long into final CustomerSummary object
     val groupFunction: (Long, Iterator[CustomerPurchase]) => CustomerSummary = {
 
       case (customer_id: Long, purchases: Iterator[CustomerPurchase]) =>
