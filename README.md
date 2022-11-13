@@ -137,8 +137,8 @@ trait V2 {
     val aggFunction = new PurchaseAggregator().toColumn
 
     purchases.groupByKey(_.customer_id)
-             .agg(aggFunction)
-             .select($"_2".as[CustomerSummary])
+      .agg(aggFunction.name("summary"))
+      .select($"summary".as[CustomerSummary])
 
   }
 
