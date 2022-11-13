@@ -2,18 +2,22 @@ package com.palmer.data.shoes
 
 import org.apache.spark.sql.{Dataset, SparkSession}
 
-object ShapesOnShoesV1 extends App {
+
+trait ShapesOnShoesApp extends App {
 
   lazy val spark: SparkSession = SparkSession.builder().getOrCreate()
+  def transformPurchases(value: Dataset[CustomerPurchase]): Dataset[CustomerSummary]
+
   import spark.implicits._
 
   if (args.length != 2) throw new IllegalArgumentException("Must have two arguments")
-  val purchasePath = args(0); val summaryPath = args(1)
+  val purchasePath = args(0);
+  val summaryPath = args(1)
 
   // Load customer purchases dataset and encode as case class
   val purchases = spark.read
-                       .parquet(purchasePath)
-                       .as[CustomerPurchase]
+    .parquet(purchasePath)
+    .as[CustomerPurchase]
 
   // Run transformation function
   val summaries = transformPurchases(purchases)
@@ -21,9 +25,15 @@ object ShapesOnShoesV1 extends App {
   // Write to provided path
   summaries.write.parquet(summaryPath)
 
+}
+
+object ShapesOnShoesV1App extends ShapesOnShoesApp {
+
   def transformPurchases(purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary] = {
 
-    purchases.groupByKey(_.customer_id).mapGroups {
+    import spark.implicits._
+
+    val groupFunction: (Long, Iterator[CustomerPurchase]) => CustomerSummary = {
 
       case (customer_id: Long, purchases: Iterator[CustomerPurchase]) =>
 
@@ -55,6 +65,9 @@ object ShapesOnShoesV1 extends App {
         )
 
     }
+
+    purchases.groupByKey(_.customer_id).mapGroups(groupFunction)
+
   }
 
 }
