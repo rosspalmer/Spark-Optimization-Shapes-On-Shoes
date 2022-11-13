@@ -136,12 +136,13 @@ class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuff
 
   }
 
-  private def mergeBuffers(a: SummaryBuffer, b: SummaryBuffer): SummaryBuffer = {
+  def mergeBuffers(a: SummaryBuffer, b: SummaryBuffer): SummaryBuffer = {
 
     // Merge name counts by adding `a` map to `b` map plus `a` lookup counts
-    val mergedNameCount = a.nameCount + b.nameCount.map {
-      case (name, count) => (name, a.nameCount.getOrElse(name, 0) + count)
-    }
+    val mergedNameCount: Map[String, Long] = a.nameCount ++ b.nameCount.toSeq
+      .map {
+        case (name, count) => (name, a.nameCount.getOrElse(name, 0L) + count)
+      }
 
     // First purchase is min of two dates
     val firstPurchase: Date = Seq(a.firstPurchase, b.firstPurchase).min
@@ -228,8 +229,8 @@ trait V2 {
     val aggFunction = new PurchaseAggregator().toColumn
 
     purchases.groupByKey(_.customer_id)
-             .agg(aggFunction)
-             .select($"_2".as[CustomerSummary])
+             .agg(aggFunction.name("summary"))
+             .select($"summary".as[CustomerSummary])
 
   }
 
