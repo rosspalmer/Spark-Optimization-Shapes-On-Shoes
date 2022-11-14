@@ -32,7 +32,7 @@ object RAND {
   val timestampDiff: Long = endTimestamp - startTimestamp
 
   def getRandomDate(): Date = {
-    val randomDiff = r.nextLong(timestampDiff)
+    val randomDiff = round(timestampDiff * r.nextDouble())
     val randomTimestamp = startTimestamp + randomDiff
     new Date(randomTimestamp)
   }
@@ -114,7 +114,7 @@ object DataGenerator extends App {
 
     import spark.implicits._
 
-    val SHOE_NUM_RANGE = 3
+    val SHOE_NUM_RANGE = 5
 
     // Pack majority of data generation into Spark udf with returns Seq[CustomerPurchase].
     // Total count of returned seq of data is based on defined average +-3
