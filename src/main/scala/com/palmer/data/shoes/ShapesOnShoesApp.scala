@@ -7,16 +7,15 @@ import org.apache.spark.sql.{Dataset, Encoder, SparkSession}
 import java.sql.Date
 
 
-trait ShapesOnShoesApp extends App {
-
-  def transformPurchases(purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary]
+object ShapesOnShoesApp extends App {
 
   lazy val spark: SparkSession = SparkSession.builder().getOrCreate()
   import spark.implicits._
 
-  if (args.length != 2) throw new IllegalArgumentException("Must have two arguments")
-  val purchasePath = args(0);
-  val summaryPath = args(1)
+  if (args.length != 3) throw new IllegalArgumentException("Must have three arguments")
+  val version = args(0)
+  val purchasePath = args(1)
+  val summaryPath = args(2)
 
   // Load customer purchases dataset and encode as case class
   val purchases = spark.read
@@ -24,15 +23,24 @@ trait ShapesOnShoesApp extends App {
     .as[CustomerPurchase]
 
   // Run transformation function
-  val summaries = transformPurchases(purchases)
+  val transformer: TransformFunction = version match {
+    case "v1" => V1
+    case "v2" => V2
+  }
+  val summaries = transformer.transformPurchases(purchases)
 
   // Write to provided path
   summaries.write.parquet(summaryPath)
 
 }
 
+trait TransformFunction {
 
-trait V1 {
+  def transformPurchases(purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary]
+
+}
+
+object V1 extends TransformFunction {
 
   def transformPurchases(purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary] = {
 
@@ -82,8 +90,6 @@ trait V1 {
   }
 
 }
-
-object ShapesOnShoesV1App extends ShapesOnShoesApp with V1
 
 
 // ---- V2: Using Spark SQL Aggregator extension ----
@@ -231,7 +237,7 @@ class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuff
   override def outputEncoder: Encoder[CustomerSummary] = ExpressionEncoder[CustomerSummary]
 }
 
-trait V2 {
+object V2 extends TransformFunction {
 
   def transformPurchases(purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary] = {
 
