@@ -2,7 +2,7 @@
 ThisBuild / name := "Shapes-On-Shoes"
 ThisBuild / scalaVersion := "2.12.15"
 ThisBuild / organization := "com.palmer.data"
-ThisBuild / version      := "0.2.3"
+ThisBuild / version      := "0.2.4"
 
 libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-core" % "3.3.0",

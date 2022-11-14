@@ -1,10 +1,9 @@
 package com.palmer.data.shoes
 
-import org.apache.spark.sql.functions.{explode, lit, udf}
+import org.apache.spark.sql.functions.{explode, lit, rand, udf}
 import org.apache.spark.sql.{Dataset, SparkSession}
 
 import java.sql.Date
-
 import scala.util.Random
 import scala.math.{max, round}
 
@@ -110,7 +109,7 @@ object DataGenerator extends App {
   }
 
   def generatePurchaseDataset(implicit spark: SparkSession, numberCustomers: Long, avgShoeCount: Int,
-                              circleLoversPct: Double): Dataset[CustomerPurchase] = {
+                              numPartitions: Int, circleLoversPct: Double): Dataset[CustomerPurchase] = {
 
     import spark.implicits._
 
@@ -133,7 +132,7 @@ object DataGenerator extends App {
     }
 
     // Expand generated purchase sequences for give customer id (given by range)
-    spark.range(numberCustomers)
+    spark.range(numberCustomers, 0, 1, numPartitions)
          .withColumn("purchases", explode(purchaseUDF($"id")))
          .select("purchases.*")
          .as[CustomerPurchase]
