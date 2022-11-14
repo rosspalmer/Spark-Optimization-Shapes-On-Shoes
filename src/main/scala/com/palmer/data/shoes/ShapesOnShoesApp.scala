@@ -98,7 +98,7 @@ object V1 extends TransformFunction {
 // before `finish` resolves the aggregation (map for names)
 case class SummaryBuffer(
   customerId: Long,
-  nameCount: Map[String, Long],
+  names: Seq[String],
   firstPurchase: Date,
   totalCount: Long,
   averagePrice: Double,
@@ -110,10 +110,6 @@ case class SummaryBuffer(
 
 class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuffer], CustomerSummary] {
 
-  implicit val dateOrdering = new Ordering[Date] {
-    override def compare(x: Date, y: Date): Int = x.compareTo(y)
-  }
-
   override def zero: Option[SummaryBuffer] = None
 
   override def reduce(b: Option[SummaryBuffer], a: CustomerPurchase): Option[SummaryBuffer] = {
@@ -123,7 +119,7 @@ class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuff
 
     val newBuffer = SummaryBuffer(
       customerId = a.customer_id,
-      nameCount = Map(a.customer_name -> 1),
+      names = Seq(a.customer_name),
       firstPurchase = a.purchase_date,
       totalCount = 1L,
       averagePrice = a.shoe_price,
@@ -154,14 +150,8 @@ class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuff
 
   def mergeBuffers(a: SummaryBuffer, b: SummaryBuffer): SummaryBuffer = {
 
-    // Merge name counts by adding `a` map to `b` map plus `a` lookup counts
-    val mergedNameCount: Map[String, Long] = a.nameCount ++ b.nameCount.toSeq
-      .map {
-        case (name, count) => (name, a.nameCount.getOrElse(name, 0L) + count)
-      }
-
-    // First purchase is min of two dates
-    val firstPurchase: Date = Seq(a.firstPurchase, b.firstPurchase).min
+    // First purchase is min of two dates (simple logic)
+    val firstPurchase: Date = if (a.firstPurchase.compareTo(b.firstPurchase) < 0) a.firstPurchase else b.firstPurchase
 
     // Total count and average price can be calculated
     val totalCount = a.totalCount + b.totalCount
@@ -184,7 +174,7 @@ class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuff
     SummaryBuffer(
 
       customerId = a.customerId,
-      nameCount = mergedNameCount,
+      names = a.names ++ b.names,
       firstPurchase = firstPurchase,
       totalCount = totalCount,
       averagePrice = averagePrice,
@@ -208,13 +198,10 @@ class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuff
   override def finish(reduction: Option[SummaryBuffer]): CustomerSummary = {
 
     val buf = reduction.get
-    val sortedNames: Seq[String] = if (buf.nameCount.size > 1) {
-      buf.nameCount.toSeq
-         .sortBy(_._2).reverse
-         .map(_._1)
-    } else {
-      buf.nameCount.keys.toSeq
-    }
+    val sortedNames: Seq[String] = buf.names
+                                      .groupBy(n => n).toSeq
+                                      .sortBy(_._2.length).reverse
+                                      .map(_._1)
 
     CustomerSummary(
       customer_id = buf.customerId,
