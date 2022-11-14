@@ -132,8 +132,8 @@ object DataGenerator extends App {
     }
 
     // Expand generated purchase sequences for give customer id (given by range)
-    spark.range(numberCustomers, 0, 1, numPartitions)
-         .withColumn("purchases", explode(purchaseUDF($"id")))
+    spark.range(0, numberCustomers, 1, numPartitions)
+         .withColumn("purchases", fgexplode(purchaseUDF($"id")))
          .select("purchases.*")
          .as[CustomerPurchase]
 
