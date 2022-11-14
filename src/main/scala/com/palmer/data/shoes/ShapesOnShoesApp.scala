@@ -37,6 +37,9 @@ trait V1 {
   def transformPurchases(purchases: Dataset[CustomerPurchase]): Dataset[CustomerSummary] = {
 
     import purchases.sparkSession.implicits._
+    implicit val dateOrdering = new Ordering[Date] {
+      override def compare(x: Date, y: Date): Int = x.compareTo(y)
+    }
 
     // Create anonymous function for resolving group of CustomerPurchase
     // objects by customer ID long into final CustomerSummary object
@@ -100,6 +103,10 @@ case class SummaryBuffer(
 )
 
 class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuffer], CustomerSummary] {
+
+  implicit val dateOrdering = new Ordering[Date] {
+    override def compare(x: Date, y: Date): Int = x.compareTo(y)
+  }
 
   override def zero: Option[SummaryBuffer] = None
 
