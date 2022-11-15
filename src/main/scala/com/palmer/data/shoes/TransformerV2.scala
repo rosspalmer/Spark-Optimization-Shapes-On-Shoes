@@ -1,10 +1,8 @@
 package com.palmer.data.shoes
 
-import org.apache.spark.sql.{Dataset, Encoder}
+import org.apache.spark.sql.{Dataset, Encoder, Encoders, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.expressions.Aggregator
-
-import java.sql.Date
 
 
 object TransformerV2 extends TransformFunction {
@@ -13,143 +11,146 @@ object TransformerV2 extends TransformFunction {
 
     import purchases.sparkSession.implicits._
 
-    val aggFunction = new PurchaseAggregator().toColumn
+    val info = new InfoAggregator().toColumn
+    // TODO stats aggregator
+    val best = new RatingsAggregator(true).toColumn
+    val worst = new RatingsAggregator(false).toColumn
+    val bestStar = new RatingsAggregator(true, Option("star")).toColumn
+    val circles = new CircleLoversAggregator().toColumn
+
 
     purchases.groupByKey(_.customer_id)
-      .agg(aggFunction.name("summary"))
+      .agg(
+        info.name("info"),
+        best.name("best_shoe"),
+        worst.name("worst_shoe"),
+        bestStar.name("best_star_shoe"),
+        circles.name("circle_lover_designs")
+      )
       .select($"summary".as[CustomerSummary])
 
   }
 
 }
 
-// Buffer class is optimized to retain as little data as possible
-// before `finish` resolves the aggregation (map for names)
-case class SummaryBuffer(
-                          customerId: Long,
-                          names: Seq[String],
-                          firstPurchase: Date,
-                          totalCount: Long,
-                          averagePrice: Double,
-                          best: CustomerPurchase,
-                          worst: CustomerPurchase,
-                          star: Option[CustomerPurchase],
-                          circles: Option[Set[String]]
-                        )
+case class CustomerInfo(customer_id: String, name: String, variants: Set[String])
 
-class PurchaseAggregator extends Aggregator[CustomerPurchase, Option[SummaryBuffer], CustomerSummary] {
 
-  override def zero: Option[SummaryBuffer] = None
+class InfoAggregator extends Aggregator[CustomerPurchase, (Long, Seq[String]), (Long, String, Set[String])] {
 
-  override def reduce(b: Option[SummaryBuffer], a: CustomerPurchase): Option[SummaryBuffer] = {
+  override def zero: (Long, Seq[String]) = (-1L, Seq.empty)
 
-    val isStar = a.shoe_description.contains("star")
-    val circleLover = !isStar && a.shoe_description.contains("circle")
+  override def reduce(b: (Long, Seq[String]), a: CustomerPurchase): (Long, Seq[String]) = b._1 match {
+    case -1 => (a.customer_id, Seq(a.customer_name))
+    case _ => (b._1, b._2 :+ a.customer_name)
+  }
 
-    val newBuffer = SummaryBuffer(
-      customerId = a.customer_id,
-      names = Seq(a.customer_name),
-      firstPurchase = a.purchase_date,
-      totalCount = 1L,
-      averagePrice = a.shoe_price,
-      best = a,
-      worst = a,
-      star = if (isStar) Some(a) else None,
-      circles = if (circleLover) Some(Set(a.shoe_description)) else None
-    )
-
-    // IF non-zero b case merge two buffers, else return newBuffer
-    b match {
-      case Some(other) => Some(mergeBuffers(other, newBuffer))
-      case None => Some(newBuffer)
+  override def merge(b1: (Long, Seq[String]), b2: (Long, Seq[String])): (Long, Seq[String]) = {
+    (b1._1, b2._1) match {
+      case (-1, -1) => b1
+      case (_, -1) => b1
+      case (-1, _) => b2
+      case _ => (b1._1, b1._2 ++ b2._2)
     }
+  }
+
+  override def finish(reduction: (Long, Seq[String])): (Long, String, Set[String]) = {
+
+
+    // Sort by frequency descending
+    val namesSorted = reduction._2.groupBy(n => n).toSeq
+                                  .sortBy(_._2.length).reverse
+                                  .map(_._1)
+
+    (
+      reduction._1, // Customer ID
+      namesSorted.head, // Top occurring name
+      // Variants if present
+      if (namesSorted.length > 1) namesSorted.slice(1, namesSorted.length).toSet else Set.empty
+    )
 
   }
 
-  override def merge(b1: Option[SummaryBuffer], b2: Option[SummaryBuffer]): Option[SummaryBuffer] = {
+  override def bufferEncoder: Encoder[(Long, Seq[String])] = Encoders.tuple(
+    Encoders.LONG, ExpressionEncoder[Seq[String]]
+  )
 
+  override def outputEncoder: Encoder[(Long, String, Set[String])] = Encoders.tuple(
+    Encoders.LONG, Encoders.STRING, ExpressionEncoder[Set[String]]
+  )
+}
+
+
+class RatingsAggregator(best: Boolean, designFilter: Option[String] = None)
+  extends Aggregator[CustomerPurchase, Option[CustomerPurchase], Option[CustomerPurchase]] {
+
+  val encoder = ExpressionEncoder[Option[CustomerPurchase]]
+
+  override def zero: Option[CustomerPurchase] = None
+
+  override def reduce(b: Option[CustomerPurchase], a: CustomerPurchase): Option[CustomerPurchase] = {
+
+    if (designFilter.isEmpty || a.shoe_description.contains()) {
+
+      if (b.isDefined) {
+
+        best match {
+          case true => if (a.shoe_rating > b.get.shoe_rating) Some(a) else b
+          case false => if (a.shoe_rating < b.get.shoe_rating) Some(a) else b
+        }
+
+      } else Some(a)
+
+    } else b
+
+  }
+
+  override def merge(b1: Option[CustomerPurchase], b2: Option[CustomerPurchase]): Option[CustomerPurchase] = {
     (b1, b2) match {
-      case (Some(s1), Some(s2)) => Some(mergeBuffers(s1, s2))
-      case (Some(s), None) => Some(s)
-      case (None, Some(s)) => Some(s)
+      case (Some(p1), Some(p2)) =>
+        best match {
+          case true => if (p1.shoe_rating > p2.shoe_rating) b1 else b2
+          case false => if (p1.shoe_rating < p2.shoe_rating) b1 else b2
+        }
+      case (Some(p), None) => b1
+      case (None, Some(p)) => b2
       case _ => None
     }
-
   }
 
-  def mergeBuffers(a: SummaryBuffer, b: SummaryBuffer): SummaryBuffer = {
+  override def finish(reduction: Option[CustomerPurchase]): Option[CustomerPurchase] = reduction
+  override def bufferEncoder: Encoder[Option[CustomerPurchase]] = encoder
+  override def outputEncoder: Encoder[Option[CustomerPurchase]] = encoder
 
-    // First purchase is min of two dates (simple logic)
-    val firstPurchase: Date = if (a.firstPurchase.compareTo(b.firstPurchase) < 0) a.firstPurchase else b.firstPurchase
+}
 
-    // Total count and average price can be calculated
-    val totalCount = a.totalCount + b.totalCount
-    val averagePrice = (a.totalCount * a.averagePrice + b.totalCount * b.averagePrice) / totalCount
 
-    // Only keep circle data if there are no star shoes
-    val circleLoverData: Option[Set[String]] = {
-      if (a.star.isDefined || b.star.isDefined) {
-        None
-      } else {
-        (a.circles, b.circles) match {
-          case (Some(c1), Some(c2)) => Some(c1 ++ c2)
-          case (Some(c), None) => Some(c)
-          case (None, Some(c)) => Some(c)
-          case _ => None
-        }
+class CircleLoversAggregator extends Aggregator[CustomerPurchase, Option[Set[String]], Option[Set[String]]] {
+
+  val encoder = ExpressionEncoder[Option[Set[String]]]
+
+  // Will use None to represent star shoe present
+  override def zero: Option[Set[String]] = Some(Set.empty)
+
+  override def reduce(b: Option[Set[String]], a: CustomerPurchase): Option[Set[String]] = b match {
+    case None => None
+    case Some(c) => if (a.shoe_description.contains("star")) None else {
+      if (a.shoe_description.contains("circle")) Some(c + a.shoe_description) else b
+    }
+  }
+
+  override def merge(b1: Option[Set[String]], b2: Option[Set[String]]): Option[Set[String]] = {
+    if (b1.isEmpty || b2.isEmpty) None else {
+      (b1.get.nonEmpty, b2.get.nonEmpty) match {
+        case (true, true) => Some(b1.get ++ b2.get)
+        case (true, false) => b1
+        case _ => b2
       }
     }
-
-    SummaryBuffer(
-
-      customerId = a.customerId,
-      names = a.names ++ b.names,
-      firstPurchase = firstPurchase,
-      totalCount = totalCount,
-      averagePrice = averagePrice,
-
-      // Note, merge function is biased towards `b` side
-      best = if (a.best.shoe_rating > b.best.shoe_rating) a.best else b.best,
-      worst = if (a.worst.shoe_rating < b.worst.shoe_rating) a.worst else b.worst,
-      star = (a.star, b.star) match {
-        case (Some(aStar), Some(bStar)) => if (aStar.shoe_rating > bStar.shoe_rating) Some(aStar) else Some(bStar)
-        case (Some(star), None) => Some(star)
-        case (None, Some(star)) => Some(star)
-        case _ => None
-      },
-
-      circles = circleLoverData
-
-    )
-
   }
 
-  override def finish(reduction: Option[SummaryBuffer]): CustomerSummary = {
-
-    val buf = reduction.get
-    val sortedNames: Seq[String] = buf.names
-      .groupBy(n => n).toSeq
-      .sortBy(_._2.length).reverse
-      .map(_._1)
-
-    CustomerSummary(
-      customer_id = buf.customerId,
-      customer_name = sortedNames.head,
-      // Only include lower count names as variants
-      name_variants = if (sortedNames.length > 1) sortedNames.slice(1, sortedNames.length).toSet else Set.empty,
-      first_purchase_date = buf.firstPurchase,
-      total_purchases = buf.totalCount,
-      average_price = buf.averagePrice,
-      best_shoe = buf.best,
-      worst_shoe = buf.worst,
-      best_star_shoe = buf.star,
-      circle_lover_designs = buf.circles
-    )
-
-  }
-
-  override def bufferEncoder: Encoder[Option[SummaryBuffer]] = ExpressionEncoder[Option[SummaryBuffer]]
-
-  override def outputEncoder: Encoder[CustomerSummary] = ExpressionEncoder[CustomerSummary]
+  override def finish(reduction: Option[Set[String]]): Option[Set[String]] = reduction
+  override def bufferEncoder: Encoder[Option[Set[String]]] = encoder
+  override def outputEncoder: Encoder[Option[Set[String]]] = encoder
 
 }
