@@ -146,7 +146,7 @@ class DataGeneratorTest extends AnyWordSpec with Matchers with SparkTest {
       val AVG_SHOES = 2
       val CIRCLE_LOVE = 0.5
 
-      val df = DataGenerator.generatePurchaseDataset(spark, NUM_CUSTOMERS, AVG_SHOES, CIRCLE_LOVE)
+      val df = DataGenerator.generatePurchaseDataset(spark, NUM_CUSTOMERS, AVG_SHOES, 2, CIRCLE_LOVE)
                             .persist()
 
       "have proper absolute max/min bounds" in {
